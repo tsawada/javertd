@@ -31,6 +31,9 @@ func flagCheck() error {
 	if *host == "" {
 		return errors.New("Please specify --hostname")
 	}
+	lib.User = *user
+	lib.Pass = *pass
+	lib.Host = *host
 	return nil
 }
 
