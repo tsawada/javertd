@@ -15,10 +15,11 @@ import (
 )
 
 type Server struct {
-	User           string
-	Pass           string
-	Host           string
-	AllowAnonymous bool
+	User            string
+	Pass            string
+	Host            string
+	AllowAnonymous  bool
+	RestrictedPorts map[int]struct{}
 }
 
 func (srv *Server) checkAuth(r *http.Request) bool {
@@ -70,7 +71,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if req.Method == "CONNECT" {
-		connectHandler(w, req)
+		srv.connectHandler(w, req)
 		return
 	}
 

@@ -41,10 +41,14 @@ func hijackedHandler(remote *net.TCPConn, local net.Conn, bufrw *bufio.ReadWrite
 	<-complete
 }
 
-func connectHandler(w http.ResponseWriter, req *http.Request) {
+func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 	addr, err := net.ResolveTCPAddr("tcp", req.Host)
 	if err != nil {
 		http.Error(w, "DNS Resolution Failed: "+req.Host, http.StatusBadGateway)
+		return
+	}
+	if _, ok := srv.RestrictedPorts[addr.Port]; ok {
+		http.Error(w, "Connection to port %d is restricted", http.StatusForbidden)
 		return
 	}
 	conn, err := net.DialTCP("tcp", nil, addr)

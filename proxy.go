@@ -9,18 +9,21 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/tsawada/proxy/lib"
 )
 
 var (
-	port     = flag.Int("port", 1080, "HTTP port")
-	host     = flag.String("hostname", "", "Serve Proxy on this hostname")
-	user     = flag.String("username", "", "Username for Proxy auth")
-	pass     = flag.String("password", "", "Password for Proxy auth")
-	certFile = flag.String("cert", "", "Certificate file")
-	keyFile  = flag.String("key", "", "Key file")
+	port            = flag.Int("port", 1080, "HTTP port")
+	host            = flag.String("hostname", "", "Serve Proxy on this hostname")
+	user            = flag.String("username", "", "Username for Proxy auth")
+	pass            = flag.String("password", "", "Password for Proxy auth")
+	certFile        = flag.String("cert", "", "Certificate file")
+	keyFile         = flag.String("key", "", "Key file")
+	restrictedPorts = flag.String("restrictedPorts", "25", "List of port numbers CONNECT won't connect")
+	parsedRePorts   []int
 )
 
 func flagCheck() error {
@@ -30,6 +33,15 @@ func flagCheck() error {
 	}
 	if *host == "" {
 		return errors.New("Please specify --hostname")
+	}
+	l := strings.Split(*restrictedPorts, ",")
+	parsedRePorts := make([]int, len(l))
+	for i, v := range l {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.New("Bad port in --restrictedPorts")
+		}
+		parsedRePorts[i] = n
 	}
 	return nil
 }
@@ -41,9 +53,13 @@ func main() {
 		os.Exit(1)
 	}
 	m := &lib.Server{
-		User: *user,
-		Pass: *pass,
-		Host: *host,
+		User:            *user,
+		Pass:            *pass,
+		Host:            *host,
+		RestrictedPorts: make(map[int]struct{}, len(parsedRePorts)),
+	}
+	for _, i := range parsedRePorts {
+		m.RestrictedPorts[i] = struct{}{}
 	}
 	c := make(chan struct{})
 	go func() {
