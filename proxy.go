@@ -52,8 +52,8 @@ func main() {
 	}()
 	go func() {
 		var certificate tls.Certificate
-		var err error
 		if *keyFile != "" && *certFile != "" {
+			var err error
 			certificate, err = tls.LoadX509KeyPair(*certFile, *keyFile)
 			if err != nil {
 				log.Fatal(err)

@@ -21,16 +21,20 @@ func (fw flushWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
-func hijackedHandler(conn net.Conn, local net.Conn, bufrw *bufio.ReadWriter) {
+func hijackedHandler(remote *net.TCPConn, local net.Conn, bufrw *bufio.ReadWriter) {
 	defer local.Close()
 	bufrw.Flush()
 	complete := make(chan bool)
 	go func() {
-		io.Copy(conn, bufrw)
+		io.Copy(remote, bufrw)
+		fmt.Println("client->remote complete")
+		remote.CloseWrite()
 		complete <- true
 	}()
 	go func() {
-		io.Copy(bufrw, conn)
+		io.Copy(bufrw, remote)
+		fmt.Println("remote->client complete")
+		bufrw.Flush()
 		complete <- true
 	}()
 	<-complete
@@ -38,7 +42,12 @@ func hijackedHandler(conn net.Conn, local net.Conn, bufrw *bufio.ReadWriter) {
 }
 
 func connectHandler(w http.ResponseWriter, req *http.Request) {
-	conn, err := net.Dial("tcp", req.Host)
+	addr, err := net.ResolveTCPAddr("tcp", req.Host)
+	if err != nil {
+		http.Error(w, "DNS Resolution Failed: "+req.Host, http.StatusBadGateway)
+		return
+	}
+	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)

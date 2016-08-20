@@ -15,12 +15,17 @@ import (
 )
 
 type Server struct {
-	User string
-	Pass string
-	Host string
+	User           string
+	Pass           string
+	Host           string
+	AllowAnonymous bool
 }
 
 func (srv *Server) checkAuth(r *http.Request) bool {
+	if srv.AllowAnonymous {
+		r.Header.Del("Proxy-Authorization")
+		return true
+	}
 	s := strings.SplitN(r.Header.Get("Proxy-Authorization"), " ", 2)
 	if len(s) != 2 {
 		return false
@@ -39,11 +44,9 @@ func (srv *Server) checkAuth(r *http.Request) bool {
 	return pair[0] == srv.User && pair[1] == srv.Pass
 }
 
-func ProxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Proxy-Authenticate", `Basic realm="MY REALM"`)
-	//http.Error(w, "407 Proxy Authentication Required", http.StatusProxyAuthRequired)
-	w.WriteHeader(407)
-	w.Write([]byte(http.StatusText(http.StatusProxyAuthRequired)))
+func proxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+	http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -62,7 +65,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if !srv.checkAuth(req) {
 		fmt.Fprintf(os.Stderr, "auth req\n")
-		ProxyAuthRequired(w, req)
+		proxyAuthRequired(w, req)
 		return
 	}
 
