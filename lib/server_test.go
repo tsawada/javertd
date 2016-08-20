@@ -48,8 +48,8 @@ func TestGet(t *testing.T) {
 	if err != nil {
 		t.Errorf("Get failed: %v", err)
 	}
-	if resp.StatusCode != 200 {
-		t.Errorf("Get failed: got %v want %v", resp.StatusCode, 200)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Get failed: got %v want %v", resp.StatusCode, http.StatusOK)
 	}
 }
 
@@ -79,6 +79,7 @@ func TestConnect(t *testing.T) {
 }
 
 func createEchoServer() net.Listener {
+	// Extract net.Listener from httptest.Server, to share httptest.serve flag
 	ts := httptest.NewUnstartedServer(nil)
 	l := ts.Listener
 	go func() {
@@ -106,14 +107,7 @@ func TestConnectHeader(t *testing.T) {
 	echo := createEchoServer()
 	defer echo.Close()
 
-	// http.Transport removes Transfer-Encoding automatically, thus not usable in this test
-	//req, _ := http.NewRequest("CONNECT", proxy.URL, strings.NewReader(""))
-	/*
-		c := &http.Client{
-			Transport: &http.Transport{
-				DisableCompression: true},
-		}
-	*/
+	// net/http modifies response headers, thus directly use TCPConn
 	c, err := net.DialTCP("tcp", nil, proxy.Listener.Addr().(*net.TCPAddr))
 	w := "CONNECT " + echo.Addr().String() + " HTTP/1.1\r\n" +
 		"Host: " + echo.Addr().String() + "\r\n\r\n\r\n"
@@ -129,8 +123,24 @@ func TestConnectHeader(t *testing.T) {
 
 }
 
-func BenchmarkHello(b *testing.B) {
+func BenchmarkGet(b *testing.B) {
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
+	defer proxy.Close()
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer ts.Close()
+
+	proxy_url, _ := url.Parse(proxy.URL)
+	proxy_url.User = url.UserPassword("user", "pass")
+	pt := &http.Transport{
+		Proxy: http.ProxyURL(proxy_url),
+	}
+	defer pt.CloseIdleConnections()
+
+	c := &http.Client{Transport: pt}
 	for i := 0; i < b.N; i++ {
-		fmt.Sprintf("hello")
+		resp, err := c.Get(ts.URL)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			b.FailNow()
+		}
 	}
 }
