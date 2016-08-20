@@ -9,31 +9,18 @@ import (
 	"net/http/httputil"
 	"os"
 	"strings"
-)
 
-var (
-	User string
-	Pass string
-	Host string
+	"golang.org/x/net/context"
+	"golang.org/x/net/context/ctxhttp"
 )
 
 type Server struct {
-	http.Server
+	User string
+	Pass string
+	Host string
 }
 
-func (s *Server) ListenAndServe() error {
-	return s.Server.ListenAndServe()
-}
-
-func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
-	return s.Server.ListenAndServeTLS(certFile, keyFile)
-}
-
-func LocalHandler(w http.ResponseWriter, req *http.Request) {
-	http.NotFound(w, req)
-}
-
-func checkAuth(r *http.Request) bool {
+func (srv *Server) checkAuth(r *http.Request) bool {
 	s := strings.SplitN(r.Header.Get("Proxy-Authorization"), " ", 2)
 	if len(s) != 2 {
 		return false
@@ -49,7 +36,7 @@ func checkAuth(r *http.Request) bool {
 		return false
 	}
 
-	return pair[0] == User && pair[1] == Pass
+	return pair[0] == srv.User && pair[1] == srv.Pass
 }
 
 func ProxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
@@ -59,7 +46,8 @@ func ProxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(http.StatusText(http.StatusProxyAuthRequired)))
 }
 
-func HelloHandler(w http.ResponseWriter, req *http.Request) {
+func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	ctx := context.Background()
 	dump, err := httputil.DumpRequest(req, false)
 	if err != nil {
 		log.Fatal(err)
@@ -67,12 +55,12 @@ func HelloHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Printf("> %q\n", dump)
 	fmt.Printf("%s %s %s\n", req.URL.Scheme, req.URL.Host, req.URL.String())
 
-	if req.Host == Host {
-		LocalHandler(w, req)
+	if req.Host == srv.Host {
+		localHandler(w, req)
 		return
 	}
 
-	if !checkAuth(req) {
+	if !srv.checkAuth(req) {
 		fmt.Fprintf(os.Stderr, "auth req\n")
 		ProxyAuthRequired(w, req)
 		return
@@ -101,7 +89,7 @@ func HelloHandler(w http.ResponseWriter, req *http.Request) {
 	}
 	fmt.Printf(">> %q\n", dump)
 
-	resp, err := http.DefaultClient.Do(freq)
+	resp, err := ctxhttp.Do(ctx, nil, freq)
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

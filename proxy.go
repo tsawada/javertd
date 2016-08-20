@@ -31,9 +31,6 @@ func flagCheck() error {
 	if *host == "" {
 		return errors.New("Please specify --hostname")
 	}
-	lib.User = *user
-	lib.Pass = *pass
-	lib.Host = *host
 	return nil
 }
 
@@ -43,9 +40,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
 	}
+	m := &lib.Server{
+		User: *user,
+		Pass: *pass,
+		Host: *host,
+	}
 	c := make(chan struct{})
 	go func() {
-		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), http.HandlerFunc(lib.HelloHandler)))
+		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), m))
 		c <- struct{}{}
 	}()
 	go func() {
@@ -64,13 +66,13 @@ func main() {
 			}
 			ioutil.WriteFile("privkey.pem", lib.PrivToPem(privKey), 0644)
 		}
-		s := &lib.Server{http.Server{
+		s := http.Server{
 			Addr:    ":8443",
-			Handler: http.HandlerFunc(lib.HelloHandler),
+			Handler: m,
 			TLSConfig: &tls.Config{
 				Certificates: []tls.Certificate{certificate},
 			},
-		}}
+		}
 		log.Fatal(s.ListenAndServeTLS("", ""))
 		c <- struct{}{}
 	}()
