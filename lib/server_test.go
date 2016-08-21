@@ -15,6 +15,18 @@ import (
 	"testing"
 )
 
+func getProxiedClient(s *httptest.Server) *http.Client {
+	u, _ := url.Parse(s.URL)
+	srv, ok := s.Config.Handler.(*Server)
+	if !ok {
+		panic("")
+	}
+	if !srv.AllowAnonymous {
+		u.User = url.UserPassword(srv.User, srv.Pass)
+	}
+	return &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
+}
+
 func TestNoAuth(t *testing.T) {
 	s := Server{Host: "example.com"}
 	r, _ := http.NewRequest("GET", "http://other.com", strings.NewReader(""))
@@ -31,19 +43,13 @@ func TestNoAuth(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	s := &Server{Host: "localhost", User: "user", Pass: "pass"}
-	proxy := httptest.NewServer(s)
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello, client")
 	}))
 	defer ts.Close()
-	proxy_url, _ := url.Parse(proxy.URL)
-	proxy_url.User = url.UserPassword("user", "pass")
-	pt := &http.Transport{
-		Proxy: http.ProxyURL(proxy_url),
-	}
-	c := &http.Client{Transport: pt}
+	c := getProxiedClient(proxy)
 	resp, err := c.Get(ts.URL)
 	if err != nil {
 		t.Errorf("Get failed: %v", err)
@@ -54,21 +60,15 @@ func TestGet(t *testing.T) {
 }
 
 func TestConnect(t *testing.T) {
-	s := &Server{Host: "localhost", User: "user", Pass: "pass"}
-	proxy := httptest.NewServer(s)
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello, client")
 	}))
 	ts.StartTLS()
 	defer ts.Close()
-	proxy_url, _ := url.Parse(proxy.URL)
-	proxy_url.User = url.UserPassword("user", "pass")
-	pt := &http.Transport{
-		Proxy:           http.ProxyURL(proxy_url),
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	c := &http.Client{Transport: pt}
+	c := getProxiedClient(proxy)
+	c.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	resp, err := c.Get(ts.URL)
 	if err != nil {
 		t.Errorf("Get failed: %v", err)
@@ -123,20 +123,56 @@ func TestConnectHeader(t *testing.T) {
 
 }
 
+func hijackHandler(f func(*http.Request) *http.Response) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			panic("Couln't hijack")
+		}
+		c, bufrw, err := hj.Hijack()
+		if err != nil {
+			panic("Hijack() failed")
+		}
+		f(r).Write(bufrw)
+		bufrw.Flush()
+		c.Close()
+	})
+}
+
+// Even when remote server replies with HTTP/1.0, the proxy should use HTTP/1.1
+func TestTransformHTTP10(t *testing.T) {
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
+	defer proxy.Close()
+	ts := httptest.NewServer(hijackHandler(func(*http.Request) *http.Response {
+		// Returns 200 OK HTTP/1.0
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			ProtoMajor: 1,
+			ProtoMinor: 0,
+		}
+	}))
+	defer ts.Close()
+
+	c := getProxiedClient(proxy)
+	resp, err := c.Get(ts.URL)
+	if err != nil {
+		t.Errorf("Get failed: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("Get failed: got %v want %v", resp.StatusCode, 200)
+	}
+	if resp.ProtoMajor != 1 || resp.ProtoMinor != 1 {
+		t.Errorf("got %v want %v", resp.Proto, "1.1")
+	}
+}
+
 func BenchmarkGet(b *testing.B) {
 	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()
 	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer ts.Close()
+	c := getProxiedClient(proxy)
 
-	proxy_url, _ := url.Parse(proxy.URL)
-	proxy_url.User = url.UserPassword("user", "pass")
-	pt := &http.Transport{
-		Proxy: http.ProxyURL(proxy_url),
-	}
-	defer pt.CloseIdleConnections()
-
-	c := &http.Client{Transport: pt}
 	for i := 0; i < b.N; i++ {
 		resp, err := c.Get(ts.URL)
 		if err != nil || resp.StatusCode != http.StatusOK {
