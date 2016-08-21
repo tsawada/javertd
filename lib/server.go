@@ -106,6 +106,8 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	fmt.Printf("<< %q\n", dump)
 
+	// Public header MUST be removed. RFC2068 Section 14.35 Public
+	resp.Header.Del("Public")
 	for k, h := range resp.Header {
 		for _, v := range h {
 			w.Header().Add(k, v)

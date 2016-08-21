@@ -166,6 +166,52 @@ func TestTransformHTTP10(t *testing.T) {
 	}
 }
 
+// Test if proxy removes Public header correctly (Required in RFC 2068)
+func TestRemovePublic(t *testing.T) {
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
+	defer proxy.Close()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Public", "GET, PUT")
+	}))
+	defer ts.Close()
+	c := getProxiedClient(proxy)
+
+	resp, err := c.Get(ts.URL)
+	if err != nil {
+		t.Errorf("Get() failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("got %v want %v", resp.StatusCode, http.StatusOK)
+	}
+	if p, ok := resp.Header[http.CanonicalHeaderKey("Public")]; ok {
+		t.Errorf("Public header exists: %v", p)
+	}
+}
+
+func TestCustomHopByHopHeader(t *testing.T) {
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
+	defer proxy.Close()
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if _, ok := r.Header[http.CanonicalHeaderKey("Foo")]; ok {
+			t.Errorf("Custom Hop-by-Hop header exists in the request")
+		}
+	}))
+	defer ts.Close()
+	c := getProxiedClient(proxy)
+
+	req, _ := http.NewRequest("GET", ts.URL, strings.NewReader(""))
+	req.Header.Set("Connection", http.CanonicalHeaderKey("Foo"))
+	req.Header.Set("Foo", "Bar")
+
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Errorf("Get() failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("got %v want %v", resp.StatusCode, http.StatusOK)
+	}
+}
+
 func BenchmarkGet(b *testing.B) {
 	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()

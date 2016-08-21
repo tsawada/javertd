@@ -27,13 +27,11 @@ func hijackedHandler(remote *net.TCPConn, local net.Conn, bufrw *bufio.ReadWrite
 	complete := make(chan bool)
 	go func() {
 		io.Copy(remote, bufrw)
-		fmt.Println("client->remote complete")
 		remote.CloseWrite()
 		complete <- true
 	}()
 	go func() {
 		io.Copy(bufrw, remote)
-		fmt.Println("remote->client complete")
 		bufrw.Flush()
 		complete <- true
 	}()
@@ -79,6 +77,7 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 		complete := make(chan bool)
 		go func() {
 			io.Copy(conn, req.Body)
+			conn.CloseWrite()
 			req.Body.Close() // probably not needed
 			complete <- true
 		}()
