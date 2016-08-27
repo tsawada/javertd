@@ -2,12 +2,10 @@ package lib
 
 import (
 	"encoding/base64"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
-	"os"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -67,8 +65,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("> %q\n", dump)
-	fmt.Printf("%s %s %s\n", req.URL.Scheme, req.URL.Host, req.URL.String())
+	log.Printf("> %q\n", dump)
 
 	if req.Host == srv.Host {
 		localHandler(w, req)
@@ -76,7 +73,6 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !srv.checkAuth(req) {
-		fmt.Fprintf(os.Stderr, "auth req\n")
 		proxyAuthRequired(w, req)
 		return
 	}
@@ -110,7 +106,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf(">> %q\n", dump)
+	log.Printf(">> %q\n", dump)
 
 	resp, err := ctxhttp.Do(ctx, nil, freq)
 	if err != nil {
@@ -123,7 +119,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("<< %q\n", dump)
+	log.Printf("<< %q\n", dump)
 
 	h := w.Header()
 	for k, v := range resp.Header {
