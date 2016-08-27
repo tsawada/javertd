@@ -168,6 +168,39 @@ func TestHTTP20(t *testing.T) {
 	}
 }
 
+func TestHTTP20echo(t *testing.T) {
+	proxy := httptest.NewUnstartedServer(&Server{Host: "localhost", AllowAnonymous: true})
+	defer proxy.Close()
+	http2.ConfigureServer(proxy.Config, &http2.Server{})
+	proxy.TLS = proxy.Config.TLSConfig
+	proxy.StartTLS()
+
+	echo := createEchoServer()
+	r, w := io.Pipe()
+	req, err := http.NewRequest("CONNECT", echo.Addr().String(), r)
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	c := &http.Client{
+		Transport: &http2RoundTripper{Proxy: proxy.Listener.Addr().String()},
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	fmt.Printf("Connected\n")
+	w.Write([]byte("123"))
+	w.Close()
+	s, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	if string(s) != "" {
+		t.Errorf("got %v want %v", s, []byte{})
+	}
+	resp.Body.Close()
+}
+
 func createEchoServer() net.Listener {
 	// Extract net.Listener from httptest.Server, to share httptest.serve flag
 	ts := httptest.NewUnstartedServer(nil)
