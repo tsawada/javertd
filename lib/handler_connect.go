@@ -57,6 +57,7 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 	}
 	defer conn.Close()
 	header := w.Header()
+	// XXX: this doesn't seem to remove all the headers
 	header["Content-Length"] = nil
 	header["Content-Type"] = nil
 	header["Transfer-Encoding"] = nil

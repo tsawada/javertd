@@ -14,6 +14,14 @@ import (
 	"golang.org/x/net/context/ctxhttp"
 )
 
+var hopByHopHeaders = []string{
+	"Connection",
+	"Keep-Alive",
+	"Public",
+	"Proxy-Authenticate",
+	"Transfer-Encoding",
+	"Upgrade"}
+
 type Server struct {
 	User            string
 	Pass            string
@@ -87,6 +95,14 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	freq.Header = req.Header
 
+	// Remove hop-by-hop headers
+	for _, v := range req.Header["Connection"] {
+		req.Header[v] = nil
+	}
+	for _, v := range hopByHopHeaders {
+		req.Header[v] = nil
+	}
+
 	dump, err = httputil.DumpRequestOut(freq, false)
 	if err != nil {
 		log.Fatal(err)
@@ -106,13 +122,13 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	fmt.Printf("<< %q\n", dump)
 
-	// Public header MUST be removed. RFC2068 Section 14.35 Public
-	resp.Header.Del("Public")
-	for k, h := range resp.Header {
-		for _, v := range h {
-			w.Header().Add(k, v)
-		}
+	h := w.Header()
+	for k, v := range resp.Header {
+		h[k] = v
 	}
+
+	// Public header MUST be removed. RFC2068 Section 14.35 Public
+	h["Public"] = nil
 
 	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, resp.Body)
