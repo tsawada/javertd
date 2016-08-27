@@ -1,7 +1,7 @@
 package lib
 
 import (
-	//"bufio"
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -75,6 +75,49 @@ func TestConnect(t *testing.T) {
 	}
 	if resp.StatusCode != 200 {
 		t.Errorf("Get failed: got %v want %v", resp.StatusCode, 200)
+	}
+}
+
+type httpsRoundTripper struct {
+	Proxy string
+}
+
+func (t *httpsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	pc, err := tls.Dial("tcp", t.Proxy, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		return nil, err
+	}
+	req.WriteProxy(pc)
+	res, err := http.ReadResponse(bufio.NewReader(pc), req)
+	return res, err
+}
+
+func TestHTTPS(t *testing.T) {
+	proxy := httptest.NewUnstartedServer(&Server{Host: "localhost", AllowAnonymous: true})
+	proxy.StartTLS()
+	defer proxy.Close()
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "TestHTTPS")
+	}))
+	ts.Start()
+	defer ts.Close()
+
+	c := &http.Client{
+		Transport: &httpsRoundTripper{Proxy: proxy.Listener.Addr().String()},
+	}
+	resp, err := c.Get(ts.URL + "/TestHTTPS")
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Get failed: got %v want %v", resp.StatusCode, http.StatusOK)
+	}
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Errorf("err: %v", err)
+	}
+	if s := string(b); s != "TestHTTPS\n" {
+		t.Errorf("Get failed: got %#v want %#v", s, "TestHTTPS\n")
 	}
 }
 
