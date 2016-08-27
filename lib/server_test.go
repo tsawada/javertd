@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	//"net/textproto"
+	"golang.org/x/net/http2"
 	"net/url"
 	"strings"
 	"testing"
@@ -118,6 +119,52 @@ func TestHTTPS(t *testing.T) {
 	}
 	if s := string(b); s != "TestHTTPS\n" {
 		t.Errorf("Get failed: got %#v want %#v", s, "TestHTTPS\n")
+	}
+}
+
+type http2RoundTripper struct {
+	Proxy string
+}
+
+func (t *http2RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	pc, err := tls.Dial("tcp", t.Proxy, &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{http2.NextProtoTLS},
+		ServerName:         "localhost",
+	})
+	if err != nil {
+		return nil, err
+	}
+	h2t := &http2.Transport{}
+	cc, err := h2t.NewClientConn(pc)
+	if err != nil {
+		return nil, err
+	}
+	return cc.RoundTrip(req)
+}
+
+func TestHTTP20(t *testing.T) {
+	proxy := httptest.NewUnstartedServer(&Server{Host: "localhost", AllowAnonymous: true})
+	defer proxy.Close()
+	http2.ConfigureServer(proxy.Config, &http2.Server{})
+	proxy.TLS = proxy.Config.TLSConfig
+	proxy.StartTLS()
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "Hello, client")
+	}))
+	defer ts.Close()
+	ts.Start()
+
+	c := &http.Client{
+		Transport: &http2RoundTripper{Proxy: proxy.Listener.Addr().String()},
+	}
+
+	resp, err := c.Get(ts.URL + "/TestHTTP20")
+	if err != nil {
+		t.Errorf("Get failed: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("Get failed: got %v want %v", resp.StatusCode, 200)
 	}
 }
 
