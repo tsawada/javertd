@@ -15,12 +15,15 @@ import (
 )
 
 var hopByHopHeaders = []string{
-	"Connection",
-	"Keep-Alive",
-	"Public",
-	"Proxy-Authenticate",
-	"Transfer-Encoding",
-	"Upgrade"}
+	http.CanonicalHeaderKey("Connection"),
+	http.CanonicalHeaderKey("Keep-Alive"),
+	http.CanonicalHeaderKey("Public"),
+	http.CanonicalHeaderKey("Proxy-Authenticate"),
+	http.CanonicalHeaderKey("Proxy-Authorization"),
+	http.CanonicalHeaderKey("TE"),
+	http.CanonicalHeaderKey("Transfer-Encoding"),
+	http.CanonicalHeaderKey("Upgrade"),
+}
 
 type Server struct {
 	User            string
