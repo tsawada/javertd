@@ -6,7 +6,10 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/context"
 	"golang.org/x/net/context/ctxhttp"
@@ -23,24 +26,41 @@ var hopByHopHeaders = []string{
 	http.CanonicalHeaderKey("Upgrade"),
 }
 
+var proxyAuthorization = http.CanonicalHeaderKey("Proxy-Authorization")
+var authorization = http.CanonicalHeaderKey("Authorization")
+
+type sReq struct {
+	Id        uint64
+	Method    string
+	URL       *url.URL
+	Timestamp time.Time
+}
+
 type Server struct {
 	User            string
 	Pass            string
 	Host            string
 	AllowAnonymous  bool
 	RestrictedPorts map[int]struct{}
+
+	activeReqs map[uint64]sReq
+	nextId     uint64
 }
 
-func (srv *Server) checkAuth(r *http.Request) bool {
+func (srv *Server) getReqId() uint64 {
+	return atomic.AddUint64(&srv.nextId, 1)
+}
+
+func (srv *Server) checkAuth(r *http.Request, h string) bool {
 	if srv.AllowAnonymous {
-		r.Header.Del("Proxy-Authorization")
+		r.Header.Del(h)
 		return true
 	}
-	s := strings.SplitN(r.Header.Get("Proxy-Authorization"), " ", 2)
+	s := strings.SplitN(r.Header.Get(h), " ", 2)
 	if len(s) != 2 {
 		return false
 	}
-	r.Header.Del("Proxy-Authorization")
+	r.Header.Del(h)
 	b, err := base64.StdEncoding.DecodeString(s[1])
 	if err != nil {
 		return false
@@ -61,6 +81,18 @@ func proxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := context.Background()
+	id := srv.getReqId()
+	if srv.activeReqs == nil {
+		srv.activeReqs = make(map[uint64]sReq, 100)
+	}
+	srv.activeReqs[id] = sReq{
+		Id:        id,
+		Method:    req.Method,
+		URL:       req.URL,
+		Timestamp: time.Now(),
+	}
+	defer delete(srv.activeReqs, id)
+
 	dump, err := httputil.DumpRequest(req, false)
 	if err != nil {
 		log.Fatal(err)
@@ -68,11 +100,11 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	log.Printf("> %q\n", dump)
 
 	if req.Host == srv.Host {
-		localHandler(w, req)
+		srv.localHandler(w, req)
 		return
 	}
 
-	if !srv.checkAuth(req) {
+	if !srv.checkAuth(req, proxyAuthorization) {
 		proxyAuthRequired(w, req)
 		return
 	}
