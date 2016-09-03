@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tsawada/proxy/lib"
+	"github.com/tsawada/javertd/lib"
 )
 
 var (
