@@ -1,3 +1,5 @@
+// +build debug
+
 package lib
 
 import (
@@ -36,11 +38,6 @@ var templateHtml = `
 </html>`
 
 var t = template.Must(template.New("n").Parse(templateHtml))
-
-func (s *Server) localHandler(w http.ResponseWriter, req *http.Request) {
-	//	http.NotFound(w, req)
-	s.status(w, req)
-}
 
 type te struct {
 	Version string

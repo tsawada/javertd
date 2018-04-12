@@ -1,17 +1,16 @@
 package lib
 
 import (
-	"context"
 	"encoding/base64"
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
+)
+
+const (
+	eventUpClosed = iota
+	eventDownClosed
 )
 
 var hopByHopHeaders = []string{
@@ -28,15 +27,6 @@ var hopByHopHeaders = []string{
 var proxyAuthorization = http.CanonicalHeaderKey("Proxy-Authorization")
 var authorization = http.CanonicalHeaderKey("Authorization")
 
-type sReq struct {
-	Id         uint64
-	Method     string
-	URL        *url.URL
-	Timestamp  time.Time
-	UpClosed   bool
-	DownClosed bool
-}
-
 type Server struct {
 	User            string
 	Pass            string
@@ -44,12 +34,8 @@ type Server struct {
 	AllowAnonymous  bool
 	RestrictedPorts map[int]struct{}
 
-	activeReqs map[uint64]sReq
-	nextId     uint64
-	mu         sync.Mutex
+	debugInfo
 }
-
-const reqIDKey = 0
 
 func (srv *Server) checkAuth(r *http.Request, h string) bool {
 	if srv.AllowAnonymous {
@@ -79,50 +65,14 @@ func proxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
 }
 
-// Request tracking for debugging purpose
-func (srv *Server) startRequest(req *http.Request) uint64 {
-	if srv.activeReqs == nil {
-		srv.activeReqs = make(map[uint64]sReq, 100)
-	}
-	srv.mu.Lock()
-	id := atomic.AddUint64(&srv.nextId, 1)
-	srv.activeReqs[id] = sReq{
-		Id:        id,
-		Method:    req.Method,
-		URL:       req.URL,
-		Timestamp: time.Now(),
-	}
-	srv.mu.Unlock()
-	return id
-}
-
-func (srv *Server) endRequest(id uint64) {
-	srv.mu.Lock()
-	delete(srv.activeReqs, id)
-	srv.mu.Unlock()
-}
-
-func getReqId(req *http.Request) uint64 {
-	return req.Context().Value(reqIDKey).(uint64)
-}
-
-func setReqId(req *http.Request, reqId uint64) *http.Request {
-	ctx := context.WithValue(req.Context(), reqIDKey, reqId)
-	return req.WithContext(ctx)
+func (s *Server) localHandler(w http.ResponseWriter, req *http.Request) {
+	s.status(w, req)
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	id := srv.startRequest(req)
-	defer srv.endRequest(id)
-	req = setReqId(req, id)
-
-	dump, err := httputil.DumpRequest(req, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("> %q\n", dump)
-	log.Printf("req.Host: %s, srv.Host: %s\n", req.Host, srv.Host)
+	req = srv.startRequest(req)
+	defer srv.endRequest(req)
 
 	if req.Host == srv.Host {
 		srv.localHandler(w, req)
@@ -160,17 +110,13 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	freq.WithContext(ctx)
 
-	dump, err = httputil.DumpRequestOut(freq, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf(">> %q\n", dump)
-
 	c := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
+
+	srv.logOutgoingRequest(freq)
 
 	resp, err := c.Do(freq)
 	if err != nil {
@@ -179,11 +125,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	dump, err = httputil.DumpResponse(resp, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("<< %q\n", dump)
+	srv.logResponse(resp)
 
 	h := w.Header()
 	for k, l := range resp.Header {

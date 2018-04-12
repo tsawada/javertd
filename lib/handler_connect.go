@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -77,19 +76,13 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 	} else {
 		// HTTP/2.x
 		complete := make(chan bool)
-		id := getReqId(req)
 		go func() {
 			// src to dest
 			io.Copy(conn, req.Body)
 			conn.CloseWrite()
 			req.Body.Close() // probably not needed
 
-			srv.mu.Lock()
-			r := srv.activeReqs[id]
-			r.UpClosed = true
-			srv.activeReqs[id] = r
-			srv.mu.Unlock()
-
+			srv.updateRequest(req, eventUpClosed)
 			complete <- true
 		}()
 		go func() {
@@ -98,17 +91,10 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 			// workaround
 			req.Body.Close()
 
-			srv.mu.Lock()
-			r := srv.activeReqs[id]
-			r.DownClosed = true
-			srv.activeReqs[id] = r
-			srv.mu.Unlock()
-
+			srv.updateRequest(req, eventDownClosed)
 			complete <- true
 		}()
 		<-complete
-		log.Printf("half closed")
 		<-complete
-		log.Printf("full closed")
 	}
 }
