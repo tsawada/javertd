@@ -1,8 +1,8 @@
 package lib
 
 import (
+	"context"
 	"encoding/base64"
-	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -12,9 +12,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/context"
-	"golang.org/x/net/context/ctxhttp"
 )
 
 var hopByHopHeaders = []string{
@@ -81,8 +78,6 @@ func proxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
 	http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
 }
-
-var errUseLastLocation = errors.New("ErrUseLastLocation")
 
 // Request tracking for debugging purpose
 func (srv *Server) startRequest(req *http.Request) uint64 {
@@ -163,6 +158,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, v := range hopByHopHeaders {
 		req.Header[v] = nil
 	}
+	freq.WithContext(ctx)
 
 	dump, err = httputil.DumpRequestOut(freq, false)
 	if err != nil {
@@ -172,17 +168,11 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	c := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error {
-			// http.ErrUseLastLocation is not supported in Go 1.6
-			return errUseLastLocation
+			return http.ErrUseLastResponse
 		},
 	}
 
-	resp, err := ctxhttp.Do(ctx, c, freq)
-	if urlErr, ok := err.(*url.Error); ok {
-		if urlErr.Err == errUseLastLocation {
-			err = nil
-		}
-	}
+	resp, err := c.Do(freq)
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
