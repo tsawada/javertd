@@ -110,7 +110,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, v := range hopByHopHeaders {
 		req.Header[v] = nil
 	}
-	freq.WithContext(ctx)
+	freq = freq.WithContext(ctx)
 
 	c := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error {

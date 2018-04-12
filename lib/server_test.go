@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func getProxiedClient(s *httptest.Server) *http.Client {
@@ -361,6 +362,40 @@ func TestConcurrent(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		<-w
+	}
+}
+
+func TestCancel(t *testing.T) {
+	inHandler := make(chan struct{})
+	handlerDone := make(chan struct{})
+	proxy := httptest.NewServer(&Server{Host: "localhost", AllowAnonymous: true})
+	defer proxy.Close()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(inHandler)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout")
+		}
+		close(handlerDone)
+	}))
+	defer ts.Close()
+
+	c, err := net.Dial("tcp", proxy.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(c, fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\n\r\n", ts.Listener.Addr().String()))
+	select {
+	case <-inHandler:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout")
+	}
+	c.Close()
+	select {
+	case <-handlerDone:
+	case <-time.After(4 * time.Second):
+		t.Fatal("timeout")
 	}
 }
 
