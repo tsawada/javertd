@@ -17,6 +17,8 @@ var templateHtml = `
     <td>ReqID</td>
     <td>Timestamp</td>
     <td>Method</td>
+    <td>UpClosed</td>
+    <td>DownClosed</td>
     <td>URL</td>
    </tr>
    {{ range $id, $req := .Active }}
@@ -24,6 +26,8 @@ var templateHtml = `
     <td>{{ $id }}</td>
     <td>{{ $req.Timestamp.String }}</td>
     <td>{{ $req.Method }}</td>
+    <td>{{ $req.UpClosed }}</td>
+    <td>{{ $req.DownClosed }}</td>
     <td>{{ $req.URL.String }}</td>
    </tr>
    {{ end }}
@@ -54,10 +58,12 @@ func (srv *Server) status(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	srv.mu.Lock()
 	err := t.Execute(w, &te{
 		Version: runtime.Version(),
 		Active:  srv.activeReqs,
 	})
+	srv.mu.Unlock()
 	if err != nil {
 		log.Printf("error: %v", err)
 	}

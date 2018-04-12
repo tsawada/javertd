@@ -2,12 +2,14 @@ package lib
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,10 +32,12 @@ var proxyAuthorization = http.CanonicalHeaderKey("Proxy-Authorization")
 var authorization = http.CanonicalHeaderKey("Authorization")
 
 type sReq struct {
-	Id        uint64
-	Method    string
-	URL       *url.URL
-	Timestamp time.Time
+	Id         uint64
+	Method     string
+	URL        *url.URL
+	Timestamp  time.Time
+	UpClosed   bool
+	DownClosed bool
 }
 
 type Server struct {
@@ -45,11 +49,10 @@ type Server struct {
 
 	activeReqs map[uint64]sReq
 	nextId     uint64
+	mu         sync.Mutex
 }
 
-func (srv *Server) getReqId() uint64 {
-	return atomic.AddUint64(&srv.nextId, 1)
-}
+const reqIDKey = 0
 
 func (srv *Server) checkAuth(r *http.Request, h string) bool {
 	if srv.AllowAnonymous {
@@ -79,25 +82,52 @@ func proxyAuthRequired(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
 }
 
-func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	ctx := context.Background()
-	id := srv.getReqId()
+var errUseLastLocation = errors.New("ErrUseLastLocation")
+
+// Request tracking for debugging purpose
+func (srv *Server) startRequest(req *http.Request) uint64 {
 	if srv.activeReqs == nil {
 		srv.activeReqs = make(map[uint64]sReq, 100)
 	}
+	srv.mu.Lock()
+	id := atomic.AddUint64(&srv.nextId, 1)
 	srv.activeReqs[id] = sReq{
 		Id:        id,
 		Method:    req.Method,
 		URL:       req.URL,
 		Timestamp: time.Now(),
 	}
-	defer delete(srv.activeReqs, id)
+	srv.mu.Unlock()
+	return id
+}
+
+func (srv *Server) endRequest(id uint64) {
+	srv.mu.Lock()
+	delete(srv.activeReqs, id)
+	srv.mu.Unlock()
+}
+
+func getReqId(req *http.Request) uint64 {
+	return req.Context().Value(reqIDKey).(uint64)
+}
+
+func setReqId(req *http.Request, reqId uint64) *http.Request {
+	ctx := context.WithValue(req.Context(), reqIDKey, reqId)
+	return req.WithContext(ctx)
+}
+
+func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	id := srv.startRequest(req)
+	defer srv.endRequest(id)
+	req = setReqId(req, id)
 
 	dump, err := httputil.DumpRequest(req, false)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("> %q\n", dump)
+	log.Printf("req.Host: %s, srv.Host: %s\n", req.Host, srv.Host)
 
 	if req.Host == srv.Host {
 		srv.localHandler(w, req)
@@ -140,7 +170,19 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	log.Printf(">> %q\n", dump)
 
-	resp, err := ctxhttp.Do(ctx, nil, freq)
+	c := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			// http.ErrUseLastLocation is not supported in Go 1.6
+			return errUseLastLocation
+		},
+	}
+
+	resp, err := ctxhttp.Do(ctx, c, freq)
+	if urlErr, ok := err.(*url.Error); ok {
+		if urlErr.Err == errUseLastLocation {
+			err = nil
+		}
+	}
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -154,8 +196,10 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	log.Printf("<< %q\n", dump)
 
 	h := w.Header()
-	for k, v := range resp.Header {
-		h[k] = v
+	for k, l := range resp.Header {
+		for _, v := range l {
+			h.Add(k, v)
+		}
 	}
 
 	// Public header MUST be removed. RFC2068 Section 14.35 Public
