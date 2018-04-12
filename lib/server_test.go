@@ -338,6 +338,32 @@ func TestCustomHopByHopHeader(t *testing.T) {
 	}
 }
 
+func TestConcurrent(t *testing.T) {
+	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
+	defer proxy.Close()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	defer ts.Close()
+	c := getProxiedClient(proxy)
+	w := make(chan struct{})
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				resp, err := c.Get(ts.URL)
+				if err != nil || resp.StatusCode != http.StatusOK {
+					t.Errorf("broken response")
+					t.FailNow()
+				}
+			}
+			w <- struct{}{}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		<-w
+	}
+}
+
 func BenchmarkGet(b *testing.B) {
 	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()
