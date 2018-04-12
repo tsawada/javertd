@@ -19,8 +19,10 @@ var hopByHopHeaders = []string{
 	http.CanonicalHeaderKey("Public"),
 	http.CanonicalHeaderKey("Proxy-Authenticate"),
 	http.CanonicalHeaderKey("Proxy-Authorization"),
+	http.CanonicalHeaderKey("Proxy-Connection"),
 	http.CanonicalHeaderKey("TE"),
 	http.CanonicalHeaderKey("Transfer-Encoding"),
+	http.CanonicalHeaderKey("Trailer"),
 	http.CanonicalHeaderKey("Upgrade"),
 }
 
