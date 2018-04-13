@@ -54,3 +54,7 @@ func PrivToPem(priv crypto.PrivateKey) []byte {
 	}
 	return pem.EncodeToMemory(pemBlock)
 }
+
+func CertToPem(cert []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert})
+}

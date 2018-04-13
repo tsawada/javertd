@@ -81,6 +81,7 @@ func main() {
 				PrivateKey:  privKey,
 			}
 			ioutil.WriteFile("privkey.pem", lib.PrivToPem(privKey), 0644)
+			ioutil.WriteFile("cert.pem", lib.CertToPem(cert), 0644)
 		}
 		s := http.Server{
 			Addr:    ":8443",
