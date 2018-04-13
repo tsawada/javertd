@@ -61,7 +61,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestConnect(t *testing.T) {
+func TestConnect11(t *testing.T) {
 	proxy := httptest.NewServer(&Server{Host: "localhost", User: "user", Pass: "pass"})
 	defer proxy.Close()
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +78,38 @@ func TestConnect(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Errorf("Get failed: got %v want %v", resp.StatusCode, 200)
 	}
+}
+
+func TestConnect20(t *testing.T) {
+	proxy := httptest.NewUnstartedServer(&Server{Host: "localhost", AllowAnonymous: true})
+	defer proxy.Close()
+	http2.ConfigureServer(proxy.Config, &http2.Server{})
+	proxy.TLS = proxy.Config.TLSConfig
+	proxy.StartTLS()
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "Hello, client")
+	}))
+	defer ts.Close()
+	ts.Start()
+
+	c := &http.Client{
+		Transport: &http2RoundTripper{Proxy: proxy.Listener.Addr().String()},
+	}
+	//c.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	r, w := io.Pipe()
+	req, err := http.NewRequest(http.MethodConnect, ts.URL, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Host", ts.Listener.Addr().String())
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	io.WriteString(w, "GET / HTTP/1.1\r\nHost: host\r\n\r\n")
 }
 
 type httpsRoundTripper struct {
