@@ -4,9 +4,9 @@ package lib
 
 import (
 	"context"
-	//	"log"
+	"log"
 	"net/http"
-	//	"net/http/httputil"
+	"net/http/httputil"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -54,14 +54,12 @@ func (srv *debugInfo) startRequest(req *http.Request) *http.Request {
 		Timestamp: time.Now(),
 	}
 	srv.mu.Unlock()
-	/*
 
-		dump, err := httputil.DumpRequest(req, false)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("> %q\n", dump)
-	*/
+	dump, err := httputil.DumpRequest(req, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("> %q\n", dump)
 
 	return req
 }
@@ -92,22 +90,17 @@ func (srv *debugInfo) endRequest(req *http.Request) {
 }
 
 func (srv *debugInfo) logOutgoingRequest(req *http.Request) {
-	/*
-		dump, err := httputil.DumpRequestOut(req, false)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf(">> %q\n", dump)
-	*/
+	dump, err := httputil.DumpRequestOut(req, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf(">> %q\n", dump)
 }
 
 func (srv *debugInfo) logResponse(r *http.Response) {
-	/*
-		dump, err := httputil.DumpResponse(r, false)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("<< %q\n", dump)
-	*/
-
+	dump, err := httputil.DumpResponse(r, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("<< %q\n", dump)
 }
