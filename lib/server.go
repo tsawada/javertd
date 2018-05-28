@@ -1,10 +1,12 @@
 package lib
 
 import (
+	"context"
 	"encoding/base64"
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"strings"
 )
 
@@ -72,7 +74,6 @@ func (s *Server) localHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	ctx := req.Context()
 	req = srv.startRequest(req)
 	defer srv.endRequest(req)
 
@@ -91,38 +92,51 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var turl string
-	if req.URL.Scheme != "" {
-		turl = req.URL.String()
-	} else {
-		turl = "http://" + req.Host + req.URL.String()
+	if req.URL.Scheme == "" {
+		req.URL.Scheme = "http"
 	}
-	freq, err := http.NewRequest(req.Method, turl, req.Body)
-	if err != nil {
-		log.Fatal(err)
+	if req.URL.Host == "" {
+		req.URL.Host = req.Host
 	}
-	freq.Header = req.Header
+	req.RequestURI = ""
 
 	// Remove hop-by-hop headers
 	for _, v := range req.Header["Connection"] {
-		req.Header[v] = nil
+		log.Printf("Removing %q", v)
+		req.Header.Del(v)
 	}
 	for _, v := range hopByHopHeaders {
-		req.Header[v] = nil
-	}
-	freq = freq.WithContext(ctx)
-
-	c := &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+		req.Header.Del(v)
 	}
 
-	srv.logOutgoingRequest(freq)
+	ctx := req.Context()
+	if cn, ok := w.(http.CloseNotifier); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		notifyChan := cn.CloseNotify()
+		go func() {
+			select {
+			case <-notifyChan:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+	outreq := req.WithContext(ctx)
+	if req.ContentLength == 0 {
+		outreq.Body = nil
+	}
 
-	resp, err := c.Do(freq)
+	tr := http.DefaultTransport
+	srv.logOutgoingRequest(outreq)
+
+	resp, err := tr.RoundTrip(outreq)
 	if err != nil {
-		log.Print(err)
+		log.Printf("RoundTrip: %v: %s", err, req.URL.String())
+		outreq.WithContext(context.TODO())
+		dump, _ := httputil.DumpRequestOut(outreq, false)
+		log.Printf(">> %q\n", dump)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

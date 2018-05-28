@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +18,8 @@ func (fw flushWriter) Write(p []byte) (n int, err error) {
 	n, err = fw.w.Write(p)
 	if f, ok := fw.w.(http.Flusher); ok {
 		f.Flush()
+	} else {
+		panic("doesn't support flush!")
 	}
 	return
 }
@@ -56,17 +59,15 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer conn.Close()
-	header := w.Header()
-	// XXX: this doesn't seem to remove all the headers
-	header["Content-Length"] = nil
-	header["Content-Type"] = nil
-	header["Transfer-Encoding"] = nil
-	w.WriteHeader(200)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
 	if hj, ok := w.(http.Hijacker); ok {
 		// HTTP/1.x
+		// XXX: this doesn't seem to remove all the headers
+		header := w.Header()
+		header["Content-Length"] = nil
+		header["Content-Type"] = nil
+		header["Transfer-Encoding"] = nil
+		w.WriteHeader(200)
+
 		local, bufrw, err := hj.Hijack()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -75,26 +76,39 @@ func (srv *Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 		hijackedHandler(conn, local, bufrw)
 	} else {
 		// HTTP/2.x
-		complete := make(chan bool)
+		w.Header()["Content-Type"] = nil
+		w.Header()["Date"] = nil
+		w.WriteHeader(200)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		} else {
+			panic("no flusher")
+		}
+		log.Printf("Connected: %s", req.Host)
+		complete := make(chan error)
+		defer req.Body.Close()
 		go func() {
 			// src to dest
-			io.Copy(conn, req.Body)
-			conn.CloseWrite()
-			req.Body.Close() // probably not needed
+			_, err := io.Copy(conn, req.Body)
 
 			srv.updateRequest(req, eventUpClosed)
-			complete <- true
+			complete <- err
 		}()
 		go func() {
 			// dest to src
-			io.Copy(flushWriter{w}, conn)
-			// workaround
+			_, err := io.Copy(flushWriter{w}, conn)
 			req.Body.Close()
 
 			srv.updateRequest(req, eventDownClosed)
-			complete <- true
+			complete <- err
 		}()
-		<-complete
-		<-complete
+		err1 := <-complete
+		err2 := <-complete
+		if err1 != nil {
+			log.Printf("%s: %v", req.Host, err1)
+		}
+		if err2 != nil {
+			log.Printf("%s: %v", req.Host, err2)
+		}
 	}
 }
